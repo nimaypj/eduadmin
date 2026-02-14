@@ -4,6 +4,8 @@ from bson.objectid import ObjectId
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 import os
+from flask import jsonify
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY")
 client = MongoClient(os.environ.get("MONGO_URI"))
@@ -215,3 +217,61 @@ def forbidden(e):
 # ===============================
 if __name__ == "__main__":
     app.run(debug=True)
+# ===============================
+# REST API ENDPOINTS
+# ===============================
+
+@app.route("/api/students", methods=["GET"])
+@login_required
+def api_get_students():
+    students = list(students_collection.find())
+
+    for student in students:
+        student["_id"] = str(student["_id"])
+
+    return jsonify(students)
+
+
+@app.route("/api/students", methods=["POST"])
+@login_required
+@role_required("admin")
+def api_add_student():
+    data = request.get_json()
+
+    new_student = {
+        "name": data["name"],
+        "age": data["age"],
+        "course": data["course"]
+    }
+
+    result = students_collection.insert_one(new_student)
+
+    new_student["_id"] = str(result.inserted_id)
+
+    return jsonify(new_student), 201
+
+
+@app.route("/api/students/<id>", methods=["PUT"])
+@login_required
+@role_required("admin")
+def api_update_student(id):
+    data = request.get_json()
+
+    students_collection.update_one(
+        {"_id": ObjectId(id)},
+        {"$set": {
+            "name": data["name"],
+            "age": data["age"],
+            "course": data["course"]
+        }}
+    )
+
+    return jsonify({"message": "Student updated"})
+
+
+@app.route("/api/students/<id>", methods=["DELETE"])
+@login_required
+@role_required("admin")
+def api_delete_student(id):
+    students_collection.delete_one({"_id": ObjectId(id)})
+    return jsonify({"message": "Student deleted"})
