@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h1>Edit Student</h1>
+
+<form method="POST" class="form-card">
+    <input type="text" name="name" value="{{ student.name }}" required>
+    <input type="number" name="age" value="{{ student.age }}" required>
+    <input type="text" name="course" value="{{ student.course }}" required>
+    <button type="submit" class="btn edit-btn">Update Student</button>
+</form>
+
+{% endblock %}
+

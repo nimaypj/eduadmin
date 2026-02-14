@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-header">
+    <h1>Student Records</h1>
+</div>
+
+<!-- Stats Card -->
+<div class="stats-container">
+    <div class="stat-card">
+        <h3>Total Students</h3>
+        <p>{{ total }}</p>
+    </div>
+</div>
+
+<!-- Search Bar -->
+<div class="search-container">
+    <form method="GET" class="search-bar">
+        <input type="text" name="search" placeholder="Search by name..." value="{{ search or '' }}">
+        <button type="submit" class="btn edit-btn">Search</button>
+    </form>
+</div>
+
+<!-- Table -->
+<div class="table-container">
+    <table>
+        <tr>
+            <th>Name</th>
+            <th>Age</th>
+            <th>Course</th>
+            <th>Actions</th>
+        </tr>
+
+        {% for student in students %}
+        <tr>
+            <td>{{ student.name }}</td>
+            <td>{{ student.age }}</td>
+            <td>{{ student.course }}</td>
+            <td>
+                {% if role == "admin" %}
+                    <a href="/edit/{{ student._id }}" class="btn edit-btn">Edit</a>
+                    <a href="/delete/{{ student._id }}"
+                       class="btn delete-btn"
+                       onclick="return confirm('Are you sure?')">
+                       Delete
+                    </a>
+                {% else %}
+                    <span style="opacity: 0.6;">View Only</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+
+<!-- Pagination -->
+<div class="pagination">
+    {% if page > 1 %}
+        <a href="?page={{ page-1 }}{% if search %}&search={{ search }}{% endif %}" class="btn edit-btn">Previous</a>
+    {% endif %}
+
+    <span>Page {{ page }} of {{ total_pages }}</span>
+
+    {% if page < total_pages %}
+        <a href="?page={{ page+1 }}{% if search %}&search={{ search }}{% endif %}" class="btn edit-btn">Next</a>
+    {% endif %}
+</div>
+
+{% endblock %}
