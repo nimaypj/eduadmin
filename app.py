@@ -1,94 +1,102 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, session, abort
+# =========================================
+# IMPORTS
+# =========================================
+
+from flask import (
+    Flask, render_template, request,
+    redirect, url_for, session,
+    flash, jsonify
+)
 from pymongo import MongoClient
 from bson.objectid import ObjectId
-from werkzeug.security import generate_password_hash, check_password_hash
-from functools import wraps
+from werkzeug.security import (
+    generate_password_hash,
+    check_password_hash
+)
 import os
-from flask import jsonify
+
+
+# =========================================
+# APPLICATION CONFIGURATION
+# =========================================
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY")
-client = MongoClient(os.environ.get("MONGO_URI"))
 
+app.secret_key = os.environ.get("SECRET_KEY")
+
+MONGO_URI = os.environ.get("MONGO_URI")
+client = MongoClient(MONGO_URI)
 db = client["crud_db"]
+
 students_collection = db["students"]
 users_collection = db["users"]
 
 
-# ===============================
-# CREATE DEFAULT USERS IF MISSING
-# ===============================
-# ===============================
-# ENSURE USERS HAVE ROLES
-# ===============================
+# =========================================
+# AUTHENTICATION DECORATORS
+# =========================================
 
-admin_user = users_collection.find_one({"username": "admin"})
-if not admin_user:
-    users_collection.insert_one({
-        "username": "admin",
-        "password": generate_password_hash("admin123"),
-        "role": "admin"
-    })
-elif "role" not in admin_user:
-    users_collection.update_one(
-        {"username": "admin"},
-        {"$set": {"role": "admin"}}
-    )
-
-viewer_user = users_collection.find_one({"username": "viewer"})
-if not viewer_user:
-    users_collection.insert_one({
-        "username": "viewer",
-        "password": generate_password_hash("viewer123"),
-        "role": "viewer"
-    })
-elif "role" not in viewer_user:
-    users_collection.update_one(
-        {"username": "viewer"},
-        {"$set": {"role": "viewer"}}
-    )
-
-
-# ===============================
-# LOGIN REQUIRED DECORATOR
-# ===============================
 def login_required(f):
+    """Ensure user is logged in before accessing route."""
+    from functools import wraps
     @wraps(f)
-    def decorated_function(*args, **kwargs):
+    def wrapper(*args, **kwargs):
         if "user" not in session:
             return redirect(url_for("login"))
         return f(*args, **kwargs)
-    return decorated_function
+    return wrapper
 
 
-# ===============================
-# ROLE REQUIRED DECORATOR
-# ===============================
 def role_required(role):
-    def decorator(f):
-        @wraps(f)
-        def decorated_function(*args, **kwargs):
-            if session.get("role") != role:
-                abort(403)
-            return f(*args, **kwargs)
-        return decorated_function
-    return decorator
+    """Ensure user has required role."""
+    from functools import wraps
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if session.get("role") != role:
+            return "Access Denied", 403
+        return f(*args, **kwargs)
+    return wrapper
 
 
-# ===============================
-# LOGIN ROUTE
-# ===============================
+# =========================================
+# WEB ROUTES
+# =========================================
+
+@app.route("/")
+@login_required
+def index():
+    """Display paginated list of students."""
+    page = request.args.get("page", 1, type=int)
+    per_page = 5
+
+    students = list(
+        students_collection.find()
+        .skip((page - 1) * per_page)
+        .limit(per_page)
+    )
+
+    for student in students:
+        student["_id"] = str(student["_id"])
+
+    return render_template(
+        "index.html",
+        students=students,
+        page=page
+    )
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    """Handle user login."""
     if request.method == "POST":
-        username = request.form["username"]
-        password = request.form["password"]
+        username = request.form.get("username")
+        password = request.form.get("password")
 
         user = users_collection.find_one({"username": username})
 
         if user and check_password_hash(user["password"], password):
             session["user"] = username
-            session["role"] = user["role"]
+            session["role"] = user.get("role", "viewer")
             flash("Login successful!", "success")
             return redirect(url_for("index"))
         else:
@@ -97,133 +105,39 @@ def login():
     return render_template("login.html")
 
 
-# ===============================
-# LOGOUT
-# ===============================
 @app.route("/logout")
+@login_required
 def logout():
+    """Logout current user."""
     session.clear()
-    flash("Logged out successfully!", "info")
     return redirect(url_for("login"))
 
 
-# ===============================
-# HOME (Protected)
-# ===============================
-@app.route("/")
-@login_required
-def index():
-    page = request.args.get("page", 1, type=int)
-    per_page = 5   # number of records per page
-
-    query = request.args.get("search")
-
-    if query:
-        filter_query = {
-            "name": {"$regex": query, "$options": "i"}
-        }
-    else:
-        filter_query = {}
-
-    total_students = students_collection.count_documents(filter_query)
-
-    students = list(
-        students_collection.find(filter_query)
-        .skip((page - 1) * per_page)
-        .limit(per_page)
-    )
-
-    total_pages = (total_students + per_page - 1) // per_page
-
-    return render_template(
-        "index.html",
-        students=students,
-        total=total_students,
-        page=page,
-        total_pages=total_pages,
-        role=session.get("role"),
-        search=query
-    )
-
-
-
-# ===============================
-# ADD (Admin Only)
-# ===============================
 @app.route("/add", methods=["GET", "POST"])
 @login_required
 @role_required("admin")
 def add_student():
+    """Add a new student (Admin only)."""
     if request.method == "POST":
-        students_collection.insert_one({
-            "name": request.form["name"],
-            "age": request.form["age"],
-            "course": request.form["course"]
-        })
-
-        flash("Student added successfully!", "success")
+        student_data = {
+            "name": request.form.get("name"),
+            "age": request.form.get("age"),
+            "course": request.form.get("course")
+        }
+        students_collection.insert_one(student_data)
         return redirect(url_for("index"))
 
     return render_template("add.html")
 
 
-# ===============================
-# EDIT (Admin Only)
-# ===============================
-@app.route("/edit/<id>", methods=["GET", "POST"])
-@login_required
-@role_required("admin")
-def edit_student(id):
-    student = students_collection.find_one({"_id": ObjectId(id)})
-
-    if request.method == "POST":
-        students_collection.update_one(
-            {"_id": ObjectId(id)},
-            {"$set": {
-                "name": request.form["name"],
-                "age": request.form["age"],
-                "course": request.form["course"]
-            }}
-        )
-
-        flash("Student updated successfully!", "info")
-        return redirect(url_for("index"))
-
-    return render_template("edit.html", student=student)
-
-
-# ===============================
-# DELETE (Admin Only)
-# ===============================
-@app.route("/delete/<id>")
-@login_required
-@role_required("admin")
-def delete_student(id):
-    students_collection.delete_one({"_id": ObjectId(id)})
-    flash("Student deleted successfully!", "danger")
-    return redirect(url_for("index"))
-
-
-# ===============================
-# 403 ERROR HANDLER
-# ===============================
-@app.errorhandler(403)
-def forbidden(e):
-    return render_template("403.html"), 403
-
-
-# ===============================
-# RUN APP
-# ===============================
-if __name__ == "__main__":
-    app.run(debug=True)
-# ===============================
-# REST API ENDPOINTS
-# ===============================
+# =========================================
+# REST API ROUTES
+# =========================================
 
 @app.route("/api/students", methods=["GET"])
 @login_required
 def api_get_students():
+    """Return all students as JSON."""
     students = list(students_collection.find())
 
     for student in students:
@@ -236,6 +150,7 @@ def api_get_students():
 @login_required
 @role_required("admin")
 def api_add_student():
+    """Create new student via API."""
     data = request.get_json()
 
     new_student = {
@@ -245,7 +160,6 @@ def api_add_student():
     }
 
     result = students_collection.insert_one(new_student)
-
     new_student["_id"] = str(result.inserted_id)
 
     return jsonify(new_student), 201
@@ -255,15 +169,12 @@ def api_add_student():
 @login_required
 @role_required("admin")
 def api_update_student(id):
+    """Update student via API."""
     data = request.get_json()
 
     students_collection.update_one(
         {"_id": ObjectId(id)},
-        {"$set": {
-            "name": data["name"],
-            "age": data["age"],
-            "course": data["course"]
-        }}
+        {"$set": data}
     )
 
     return jsonify({"message": "Student updated"})
@@ -273,5 +184,15 @@ def api_update_student(id):
 @login_required
 @role_required("admin")
 def api_delete_student(id):
+    """Delete student via API."""
     students_collection.delete_one({"_id": ObjectId(id)})
+
     return jsonify({"message": "Student deleted"})
+
+
+# =========================================
+# APPLICATION ENTRY POINT
+# =========================================
+
+if __name__ == "__main__":
+    app.run(debug=True)
